@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,11 +24,22 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var bluetoothAdapter: BluetoothAdapter
 
+    // Permission launcher for multiple permissions
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
+            permissions.entries.forEach {
+                Log.d("BLE", "${it.key} = ${it.value}")
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager.adapter
+
+        // Request runtime permissions at startup
+        requestBlePermissions()
 
         setContent {
             First_applicationTheme {
@@ -35,11 +47,22 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun requestBlePermissions() {
+        requestPermissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,   // Needed on Android 6–11
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.BLUETOOTH_SCAN,         // Needed on Android 12+
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+        )
+    }
 }
 
 @Composable
 fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
-    val context = LocalContext.current   // ✅ Correct way to get Context inside Composables
+    val context = LocalContext.current
     var devices by remember { mutableStateOf(listOf<String>()) }
     var scanning by remember { mutableStateOf(false) }
 
@@ -63,7 +86,7 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
         Button(onClick = {
             if (!scanning) {
                 if (ActivityCompat.checkSelfPermission(
-                        context,   // ✅ use LocalContext.current here
+                        context,
                         Manifest.permission.BLUETOOTH_SCAN
                     ) == PackageManager.PERMISSION_GRANTED
                 ) {
