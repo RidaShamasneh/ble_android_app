@@ -1,5 +1,8 @@
 package com.example.first_application
 
+import android.os.Handler
+import android.os.Looper
+
 import android.Manifest
 import android.bluetooth.*
 import android.bluetooth.le.ScanCallback
@@ -66,7 +69,7 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
     val context = LocalContext.current
     var devices by remember { mutableStateOf(listOf<BluetoothDevice>()) }
     var scanning by remember { mutableStateOf(false) }
-    var connectedDevice by remember { mutableStateOf<String?>(null) }
+    var batteryLevel by remember { mutableStateOf<Int?>(null) }
 
     val scanner = bluetoothAdapter.bluetoothLeScanner
 
@@ -79,8 +82,10 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("BLE Scanner", style = MaterialTheme.typography.headlineMedium)
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp)) {
+        Text("BLE Battery Reader", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
 
         Button(onClick = {
@@ -114,56 +119,113 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        connectToDevice(context, device) { connectedName ->
-                            connectedDevice = connectedName
+                        connectToBatteryService(context, device) { level ->
+                            batteryLevel = level
                         }
                     }
                     .padding(8.dp)
             )
         }
 
-        connectedDevice?.let {
+        batteryLevel?.let {
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Connected to: $it", style = MaterialTheme.typography.bodyLarge)
+            Text("Battery Level: $it%", style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
+
 @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-fun connectToDevice(context: Context, device: BluetoothDevice, onConnected: (String) -> Unit) {
+fun connectToBatteryService(
+    context: Context,
+    device: BluetoothDevice,
+    onBatteryLevelRead: (Int) -> Unit
+) {
+    val BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb")
+    val BATTERY_LEVEL_UUID = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb")
+    val CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+
     device.connectGatt(context, false, object : BluetoothGattCallback() {
+
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d("BLE", "Connected to ${device.name ?: device.address}")
                 gatt.discoverServices()
-                onConnected(device.name ?: device.address)
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 Log.d("BLE", "Disconnected from ${device.name ?: device.address}")
+                gatt.close()
             }
         }
 
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                gatt.services.forEach { service ->
-                    Log.d("BLE", "Service: ${service.uuid}")
-                    service.characteristics.forEach { characteristic ->
-                        Log.d("BLE", "Characteristic: ${characteristic.uuid}")
-                        // Example: read characteristic
-                        gatt.readCharacteristic(characteristic)
-                    }
+                val batteryService = gatt.getService(BATTERY_SERVICE_UUID)
+                val batteryChar = batteryService?.getCharacteristic(BATTERY_LEVEL_UUID)
+                if (batteryChar != null) {
+                    // Read once
+                    gatt.readCharacteristic(batteryChar)
+
+                    /*
+                    Delay before enabling notifications:
+                    On Android, the GATT stack sometimes isn’t ready to accept descriptor writes immediately after discoverServices().
+                    A common workaround is to introduce a small delay before attempting to enable notifications.
+                    */
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        gatt.setCharacteristicNotification(batteryChar, true)
+                        val descriptor = batteryChar.getDescriptor(CCCD_UUID)
+                        if (descriptor != null) {
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
+                        }
+                    }, 500) // 500 ms delay
+
+
+                } else {
+                    Log.e("BLE", "Battery service not found")
                 }
             }
         }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            Log.d("BLE", "onDescriptorWrite called")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d("BLE", "Notifications enabled for ${descriptor.characteristic.uuid}")
+            } else {
+                Log.e("BLE", "Failed to enable notifications")
+            }
+        }
+
 
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             status: Int
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                val value = characteristic.value?.joinToString { it.toString() }
-                Log.d("BLE", "Read from ${characteristic.uuid}: $value")
+            if (status == BluetoothGatt.GATT_SUCCESS &&
+                characteristic.uuid == BATTERY_LEVEL_UUID
+            ) {
+                val a = characteristic.value[0]
+                Log.d("BLE", "characteristic.value --> : $a")
+                val batteryPercent = characteristic.value[0].toInt() and 0xFF
+                Log.d("BLE", "Battery Level (read): $batteryPercent%")
+                onBatteryLevelRead(batteryPercent)
+            }
+        }
+
+        override fun onCharacteristicChanged(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic
+        ) {
+            Log.d("BLE", "Battery Level (notify)!!")
+            if (characteristic.uuid == BATTERY_LEVEL_UUID) {
+                val batteryPercent = characteristic.value[0].toInt() and 0xFF
+                Log.d("BLE", "Battery Level (notify): $batteryPercent%")
+                onBatteryLevelRead(batteryPercent)
             }
         }
     })
