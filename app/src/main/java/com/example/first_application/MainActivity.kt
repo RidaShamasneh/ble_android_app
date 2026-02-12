@@ -23,6 +23,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.example.first_application.ui.theme.First_applicationTheme
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.*
 
 class MainActivity : ComponentActivity() {
@@ -69,7 +71,9 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
     var devices by remember { mutableStateOf(listOf<BluetoothDevice>()) }
     var scanning by remember { mutableStateOf(false) }
     var batteryLevel by remember { mutableStateOf<Int?>(null) }
-    var uartData by remember { mutableStateOf<List<String>>(emptyList()) }
+    var roll by remember { mutableStateOf<Float?>(null) }
+    var pitch by remember { mutableStateOf<Float?>(null) }
+    var yaw by remember { mutableStateOf<Float?>(null) }
 
     val scanner = bluetoothAdapter.bluetoothLeScanner
 
@@ -117,10 +121,14 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable {
-                        connectToServices(context, device,
+                        connectToServices(
+                            context,
+                            device,
                             onBatteryLevelRead = { level -> batteryLevel = level },
-                            onUartDataReceived = { bytes ->
-                                uartData = uartData + bytes.joinToString(" ") { b -> "%02X".format(b) }
+                            onUartDataReceived = { values ->
+                                roll = values[0]
+                                pitch = values[1]
+                                yaw = values[2]
                             }
                         )
                     }
@@ -133,13 +141,9 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
             Text("Battery Level: $it%", style = MaterialTheme.typography.bodyLarge)
         }
 
-        if (uartData.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(16.dp))
-            Text("UART Data:", style = MaterialTheme.typography.bodyLarge)
-            uartData.takeLast(10).forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodySmall)
-            }
-        }
+        roll?.let { Text("Roll: $it") }
+        pitch?.let { Text("Pitch: $it") }
+        yaw?.let { Text("Yaw: $it") }
     }
 }
 
@@ -148,7 +152,7 @@ fun connectToServices(
     context: Context,
     device: BluetoothDevice,
     onBatteryLevelRead: (Int) -> Unit,
-    onUartDataReceived: (ByteArray) -> Unit
+    onUartDataReceived: (FloatArray) -> Unit
 ) {
     val BATTERY_SERVICE_UUID = UUID.fromString("0000180F-0000-1000-8000-00805f9b34fb")
     val BATTERY_LEVEL_UUID = UUID.fromString("00002A19-0000-1000-8000-00805f9b34fb")
@@ -161,7 +165,6 @@ fun connectToServices(
 
     device.connectGatt(context, false, object : BluetoothGattCallback() {
 
-        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d("BLE", "Connected to ${device.name ?: device.address}")
@@ -172,7 +175,6 @@ fun connectToServices(
             }
         }
 
-        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 // Battery Service
@@ -234,8 +236,16 @@ fun connectToServices(
                 }
                 UART_RX_UUID -> {
                     val data = characteristic.value
-                    Log.d("BLE", "UART RX Data: ${data.joinToString(",")}")
-                    onUartDataReceived(data)
+                    if (data.size >= 16) {
+                        val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+                        val roll = buffer.getFloat(4)
+                        val pitch = buffer.getFloat(8)
+                        val yaw = buffer.getFloat(12)
+                        Log.d("BLE", "Parsed -> Roll: $roll, Pitch: $pitch, Yaw: $yaw")
+                        onUartDataReceived(floatArrayOf(roll, pitch, yaw))
+                    } else {
+                        Log.e("BLE", "UART RX data too short: ${data.size} bytes")
+                    }
                 }
             }
         }
