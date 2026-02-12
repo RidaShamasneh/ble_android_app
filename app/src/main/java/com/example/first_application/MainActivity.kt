@@ -1,95 +1,89 @@
 package com.example.first_application
 
+import android.Manifest
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
 import com.example.first_application.ui.theme.First_applicationTheme
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var bluetoothAdapter: BluetoothAdapter
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val bluetoothManager = getSystemService(BluetoothManager::class.java)
+        bluetoothAdapter = bluetoothManager.adapter
+
         setContent {
             First_applicationTheme {
-                CalculatorScreen()
+                BLEScreen(bluetoothAdapter)
             }
         }
     }
 }
 
 @Composable
-fun CalculatorScreen() {
-    var display by remember { mutableStateOf("0") }
-    var operand1 by remember { mutableStateOf<Double?>(null) }
-    var operator by remember { mutableStateOf<String?>(null) }
+fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
+    val context = LocalContext.current   // ✅ Correct way to get Context inside Composables
+    var devices by remember { mutableStateOf(listOf<String>()) }
+    var scanning by remember { mutableStateOf(false) }
 
-    fun onDigit(digit: String) {
-        display = if (display == "0") digit else display + digit
-    }
+    val scanner = bluetoothAdapter.bluetoothLeScanner
 
-    fun onOperator(op: String) {
-        operand1 = display.toDoubleOrNull()
-        operator = op
-        display = "0"
-    }
-
-    fun onEquals() {
-        val op1 = operand1
-        val op2 = display.toDoubleOrNull()
-        if (op1 != null && op2 != null && operator != null) {
-            val result = when (operator) {
-                "+" -> op1 + op2
-                "-" -> op1 - op2
-                "*" -> op1 * op2
-                "/" -> if (op2 != 0.0) op1 / op2 else Double.NaN
-                else -> op2
+    val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val name = result.device.name ?: "Unknown"
+            val address = result.device.address
+            val entry = "$name ($address)"
+            if (!devices.contains(entry)) {
+                devices = devices + entry
             }
-            display = result.toString()
-            operand1 = null
-            operator = null
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.Top,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = display, style = MaterialTheme.typography.headlineLarge)
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        Text("BLE Scanner", style = MaterialTheme.typography.headlineMedium)
         Spacer(modifier = Modifier.height(16.dp))
 
-        val buttons = listOf(
-            listOf("7", "8", "9", "/"),
-            listOf("4", "5", "6", "*"),
-            listOf("1", "2", "3", "-"),
-            listOf("0", "=", "+")
-        )
-
-        buttons.forEach { row ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                row.forEach { label ->
-                    Button(
-                        onClick = {
-                            when (label) {
-                                in "0".."9" -> onDigit(label)
-                                "+", "-", "*", "/" -> onOperator(label)
-                                "=" -> onEquals()
-                            }
-                        },
-                        modifier = Modifier.weight(1f).padding(4.dp)
-                    ) {
-                        Text(label)
-                    }
+        Button(onClick = {
+            if (!scanning) {
+                if (ActivityCompat.checkSelfPermission(
+                        context,   // ✅ use LocalContext.current here
+                        Manifest.permission.BLUETOOTH_SCAN
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    scanner.startScan(scanCallback)
+                    scanning = true
+                } else {
+                    Log.e("BLE", "Missing BLUETOOTH_SCAN permission")
                 }
+            } else {
+                scanner.stopScan(scanCallback)
+                scanning = false
             }
+        }) {
+            Text(if (scanning) "Stop Scan" else "Start Scan")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        devices.forEach { device ->
+            Text(text = device, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
