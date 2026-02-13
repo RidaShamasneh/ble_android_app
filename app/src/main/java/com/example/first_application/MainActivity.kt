@@ -27,6 +27,152 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
 
+import android.opengl.GLSurfaceView
+import android.opengl.GLU
+import androidx.compose.ui.viewinterop.AndroidView
+import javax.microedition.khronos.egl.EGLConfig
+import javax.microedition.khronos.opengles.GL10
+
+
+class CubeRenderer(
+    private val rollProvider: () -> Float?,
+    private val pitchProvider: () -> Float?,
+    private val yawProvider: () -> Float?
+) : GLSurfaceView.Renderer {
+
+    override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        gl?.glEnable(GL10.GL_DEPTH_TEST)
+        gl?.glClearColor(0f, 0f, 0f, 1f)
+    }
+
+    override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
+        gl?.glViewport(0, 0, width, height)
+        gl?.glMatrixMode(GL10.GL_PROJECTION)
+        gl?.glLoadIdentity()
+        GLU.gluPerspective(gl, 45f, width.toFloat() / height, 1f, 100f)
+        gl?.glMatrixMode(GL10.GL_MODELVIEW)
+        gl?.glLoadIdentity()
+    }
+
+    override fun onDrawFrame(gl: GL10?) {
+        gl?.glClear(GL10.GL_COLOR_BUFFER_BIT or GL10.GL_DEPTH_BUFFER_BIT)
+        gl?.glLoadIdentity()
+        gl?.glTranslatef(0f, 0f, -6f)
+
+        val roll = rollProvider() ?: 0f
+        val pitch = pitchProvider() ?: 0f
+        val yaw = yawProvider() ?: 0f
+
+        gl?.glRotatef(roll, 1f, 0f, 0f)
+        gl?.glRotatef(pitch, 0f, 1f, 0f)
+        gl?.glRotatef(yaw, 0f, 0f, 1f)
+
+        drawCube(gl)
+    }
+
+    private fun drawCube(gl: GL10?) {
+        val vertices = floatArrayOf(
+            // Front face
+            -1f, -1f,  1f,
+            1f, -1f,  1f,
+            1f,  1f,  1f,
+            -1f, -1f,  1f,
+            1f,  1f,  1f,
+            -1f,  1f,  1f,
+
+            // Back face
+            -1f, -1f, -1f,
+            -1f,  1f, -1f,
+            1f,  1f, -1f,
+            -1f, -1f, -1f,
+            1f,  1f, -1f,
+            1f, -1f, -1f,
+
+            // Left face
+            -1f, -1f, -1f,
+            -1f, -1f,  1f,
+            -1f,  1f,  1f,
+            -1f, -1f, -1f,
+            -1f,  1f,  1f,
+            -1f,  1f, -1f,
+
+            // Right face
+            1f, -1f, -1f,
+            1f,  1f, -1f,
+            1f,  1f,  1f,
+            1f, -1f, -1f,
+            1f,  1f,  1f,
+            1f, -1f,  1f,
+
+            // Top face
+            -1f,  1f, -1f,
+            -1f,  1f,  1f,
+            1f,  1f,  1f,
+            -1f,  1f, -1f,
+            1f,  1f,  1f,
+            1f,  1f, -1f,
+
+            // Bottom face
+            -1f, -1f, -1f,
+            1f, -1f, -1f,
+            1f, -1f,  1f,
+            -1f, -1f, -1f,
+            1f, -1f,  1f,
+            -1f, -1f,  1f
+        )
+
+        // One RGBA color per vertex (6 vertices per face × 6 faces = 36 vertices)
+        val colors = floatArrayOf(
+            // Front face (red)
+            1f, 0f, 0f, 1f,  1f, 0f, 0f, 1f,  1f, 0f, 0f, 1f,
+            1f, 0f, 0f, 1f,  1f, 0f, 0f, 1f,  1f, 0f, 0f, 1f,
+
+            // Back face (green)
+            0f, 1f, 0f, 1f,  0f, 1f, 0f, 1f,  0f, 1f, 0f, 1f,
+            0f, 1f, 0f, 1f,  0f, 1f, 0f, 1f,  0f, 1f, 0f, 1f,
+
+            // Left face (blue)
+            0f, 0f, 1f, 1f,  0f, 0f, 1f, 1f,  0f, 0f, 1f, 1f,
+            0f, 0f, 1f, 1f,  0f, 0f, 1f, 1f,  0f, 0f, 1f, 1f,
+
+            // Right face (yellow)
+            1f, 1f, 0f, 1f,  1f, 1f, 0f, 1f,  1f, 1f, 0f, 1f,
+            1f, 1f, 0f, 1f,  1f, 1f, 0f, 1f,  1f, 1f, 0f, 1f,
+
+            // Top face (cyan)
+            0f, 1f, 1f, 1f,  0f, 1f, 1f, 1f,  0f, 1f, 1f, 1f,
+            0f, 1f, 1f, 1f,  0f, 1f, 1f, 1f,  0f, 1f, 1f, 1f,
+
+            // Bottom face (magenta)
+            1f, 0f, 1f, 1f,  1f, 0f, 1f, 1f,  1f, 0f, 1f, 1f,
+            1f, 0f, 1f, 1f,  1f, 0f, 1f, 1f,  1f, 0f, 1f, 1f
+        )
+
+        val vertexBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        vertexBuffer.put(vertices).position(0)
+
+        val colorBuffer = ByteBuffer.allocateDirect(colors.size * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        colorBuffer.put(colors).position(0)
+
+        gl?.glEnableClientState(GL10.GL_VERTEX_ARRAY)
+        gl?.glEnableClientState(GL10.GL_COLOR_ARRAY)
+
+        gl?.glVertexPointer(3, GL10.GL_FLOAT, 0, vertexBuffer)
+        gl?.glColorPointer(4, GL10.GL_FLOAT, 0, colorBuffer)
+
+        gl?.glDrawArrays(GL10.GL_TRIANGLES, 0, vertices.size / 3)
+
+        gl?.glDisableClientState(GL10.GL_VERTEX_ARRAY)
+        gl?.glDisableClientState(GL10.GL_COLOR_ARRAY)
+    }
+
+}
+
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var bluetoothAdapter: BluetoothAdapter
@@ -63,6 +209,23 @@ class MainActivity : ComponentActivity() {
             )
         )
     }
+}
+
+@Composable
+fun CubeView(roll: Float?, pitch: Float?, yaw: Float?) {
+    AndroidView(factory = { context ->
+        GLSurfaceView(context).apply {
+            setEGLContextClientVersion(1)
+            setRenderer(CubeRenderer(
+                rollProvider = { roll },
+                pitchProvider = { pitch },
+                yawProvider = { yaw }
+            ))
+            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        }
+    }, modifier = Modifier
+        .fillMaxWidth()
+        .height(300.dp))
 }
 
 @Composable
@@ -144,6 +307,10 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
         roll?.let { Text("Roll: $it") }
         pitch?.let { Text("Pitch: $it") }
         yaw?.let { Text("Yaw: $it") }
+
+//        CubeView(15.0F, 120.0F, 115.0F)
+//        CubeView(85.0F, 3.7F, 183.0F)
+        CubeView(roll, pitch, yaw)
     }
 }
 
