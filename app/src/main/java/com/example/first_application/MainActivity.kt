@@ -63,6 +63,8 @@ class CubeRenderer(
         val pitch = pitchProvider() ?: 0f
         val yaw = yawProvider() ?: 0f
 
+//        Log.d("CubeRenderer", "Roll: $roll, Pitch: $pitch, Yaw: $yaw")
+
         gl?.glRotatef(roll, 1f, 0f, 0f)
         gl?.glRotatef(pitch, 0f, 1f, 0f)
         gl?.glRotatef(yaw, 0f, 0f, 1f)
@@ -213,14 +215,24 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun CubeView(roll: Float?, pitch: Float?, yaw: Float?) {
+    /*
+    The problem is that the lambdas are bound once at view creation and don’t update.
+    Use rememberUpdatedState to ensure the cube sees the latest values.
+     */
+    val rollState = rememberUpdatedState(roll)
+    val pitchState = rememberUpdatedState(pitch)
+    val yawState = rememberUpdatedState(yaw)
+
     AndroidView(factory = { context ->
         GLSurfaceView(context).apply {
             setEGLContextClientVersion(1)
-            setRenderer(CubeRenderer(
-                rollProvider = { roll },
-                pitchProvider = { pitch },
-                yawProvider = { yaw }
-            ))
+            setRenderer(
+                CubeRenderer(
+                    rollProvider = { rollState.value },
+                    pitchProvider = { pitchState.value },
+                    yawProvider = { yawState.value }
+                )
+            )
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         }
     }, modifier = Modifier
