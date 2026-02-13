@@ -64,10 +64,9 @@ class CubeRenderer(
         val yaw = yawProvider() ?: 0f
 
 //        Log.d("CubeRenderer", "Roll: $roll, Pitch: $pitch, Yaw: $yaw")
-
-        gl?.glRotatef(roll, 1f, 0f, 0f)
-        gl?.glRotatef(pitch, 0f, 1f, 0f)
-        gl?.glRotatef(yaw, 0f, 0f, 1f)
+        gl?.glRotatef(pitch, -1f, 0f, 0f)
+        gl?.glRotatef(yaw, 0f, 1f, 0f)
+        gl?.glRotatef(roll, 0f, 0f, -1f)
 
         drawCube(gl)
     }
@@ -252,6 +251,10 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
     var pitch by remember { mutableStateOf<Float?>(null) }
     var yaw by remember { mutableStateOf<Float?>(null) }
 
+    var roll_center by remember { mutableStateOf<Float?>(0F) }
+    var pitch_center by remember { mutableStateOf<Float?>(0F) }
+    var yaw_center by remember { mutableStateOf<Float?>(0F) }
+
     var uartTxChar by remember { mutableStateOf<BluetoothGattCharacteristic?>(null) }
     var gattConnection by remember { mutableStateOf<BluetoothGatt?>(null) }
 
@@ -265,6 +268,52 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
             }
         }
     }
+
+    fun rebasePitch(pitch: Float, pitchCenter: Float): Float {
+        return when {
+            pitchCenter in 0f..180f -> {
+                when {
+                    pitch in 0f..(pitchCenter + 180f) -> pitch - pitchCenter
+                    pitch in (pitchCenter + 180f)..360f -> pitch - pitchCenter - 360f
+                    else -> pitch - pitchCenter
+                }
+            }
+
+            pitchCenter in 180f..360f -> {
+                when {
+                    pitch in (pitchCenter - 180f)..360f -> pitch - pitchCenter
+                    pitch in 0f..<(pitchCenter - 180f) -> pitch - pitchCenter + 360f
+                    else -> pitch - pitchCenter
+                }
+            }
+
+            else -> pitch - pitchCenter
+        }
+    }
+
+    fun rebaseYaw(yaw: Float, yawCenter: Float): Float {
+        return when {
+            // First case
+            yawCenter in 0f..180f -> {
+                when {
+                    yaw in 0f..(yawCenter + 180f) -> yaw - yawCenter
+                    yaw in (yawCenter + 180f)..360f -> yaw - yawCenter - 360f
+                    else -> yaw - yawCenter
+                }
+            }
+            // Second case
+            yawCenter in 180f..360f -> {
+                when {
+                    yaw in (yawCenter - 180f)..360f -> yaw - yawCenter
+                    yaw >= 0f && yaw < (yawCenter - 180f) -> yaw - yawCenter + 360f
+                    else -> yaw - yawCenter
+                }
+            }
+            // Default case
+            else -> yaw - yawCenter
+        }
+    }
+
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     fun connectToServices(
@@ -362,9 +411,15 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
                         val data = characteristic.value
                         if (data.size >= 16) {
                             val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
-                            val roll = buffer.getFloat(4)
-                            val pitch = buffer.getFloat(8)
-                            val yaw = buffer.getFloat(12)
+                            var roll = buffer.getFloat(4)
+                            var pitch = buffer.getFloat(8)
+                            var yaw = buffer.getFloat(12)
+
+                            // Normalize pitch
+                            if (pitch < 0) {
+                                pitch += 360
+                            }
+
                             Log.d("BLE", "Parsed -> Roll: $roll, Pitch: $pitch, Yaw: $yaw")
                             onUartDataReceived(floatArrayOf(roll, pitch, yaw))
                         } else {
@@ -407,27 +462,32 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
         Spacer(modifier = Modifier.height(16.dp))
 
         devices.forEach { device ->
-            val name = device.name ?: "Unknown"
+            val name = device.name ?: "" // skip if no name
             val address = device.address
-            Text(
-                text = "$name ($address)",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        connectToServices(
-                            context,
-                            device,
-                            onBatteryLevelRead = { level -> batteryLevel = level },
-                            onUartDataReceived = { values ->
-                                roll = values[0]
-                                pitch = values[1]
-                                yaw = values[2]
-                            }
-                        )
-                    }
-                    .padding(8.dp)
-            )
+            // Only accept devices whose name starts with "LE-"
+            if (name.startsWith("LE-")) {
+                Text(
+                    text = "$name ($address)",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            connectToServices(
+                                context,
+                                device,
+                                onBatteryLevelRead = { level -> batteryLevel = level },
+                                onUartDataReceived = { values ->
+                                    roll = values[0]
+                                    pitch = values[1]
+                                    yaw = values[2]
+                                }
+                            )
+                        }
+                        .padding(8.dp)
+                )
+            } else {
+                Log.d("BLE", "Skipping device: $name")
+            }
         }
 
         batteryLevel?.let {
@@ -441,8 +501,25 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
 
 //        CubeView(15.0F, 120.0F, 115.0F)
 //        CubeView(85.0F, 3.7F, 183.0F)
-        CubeView(roll, pitch, yaw)
 
+        // Rebase EB pkt
+        val roll_rebased = roll_center?.let { roll?.minus(it) ?: 0F }
+        val pitch_rebased = rebasePitch(pitch = pitch ?: 0F, pitchCenter = pitch_center ?: 0F)
+        val yaw_rebased = rebaseYaw(yaw = yaw ?: 0F, yawCenter = yaw_center ?: 0F)
+
+        CubeView(roll_rebased, pitch_rebased, yaw_rebased)
+
+        Button(onClick = {
+            roll_center = roll
+            pitch_center = pitch
+            yaw_center = yaw
+            Log.d(
+                "BLE",
+                "Set center point roll: $roll_center, pitch: $pitch_center, yaw: $yaw_center"
+            )
+        }) {
+            Text("Set center point")
+        }
 
         Button(onClick = {
             val message = "c"
@@ -454,7 +531,7 @@ fun BLEScreen(bluetoothAdapter: BluetoothAdapter) {
                 Log.d("BLE", "Wrote to TX: $message")
             } ?: Log.e("BLE", "TX characteristic not found")
         }) {
-            Text("Reset Quaternions")
+            Text("Reset Gyroscope")
         }
 
     }
